@@ -1,6 +1,6 @@
-# cv_project — 김해시 대형폐기물 분류
+# cv_project — 대형폐기물 분류
 
-이미지 1장 → main_category(31종) + sub_category(54종) 자동 분류 → 김해시 배출수수료 안내.
+이미지 1장 → main_category(31종) + sub_category(54종) 자동 분류 → 배출수수료 안내.
 
 ## 시스템 개요 (2-stage)
 
