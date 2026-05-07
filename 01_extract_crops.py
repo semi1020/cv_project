@@ -23,7 +23,7 @@ from src.dino import DINODetector
 def parse_args():
     p = argparse.ArgumentParser(description="Extract DINO crops for all split records")
     p.add_argument("--splits", type=Path, default=Path("splits/splits.json"))
-    p.add_argument("--crop-dir", type=Path, default=Path("data/crops"))
+    p.add_argument("--crop-dir", type=Path, default=Path("/data/trash-data/crops"))
     p.add_argument("--out", type=Path, default=Path("splits/crop_splits.json"))
     return p.parse_args()
 
