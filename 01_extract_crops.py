@@ -1,19 +1,23 @@
 """
-Step 1 — Extract DINO crops for all records (run once, never again).
+Step 1 — Extract DINO crops for all records (run once per splits.json).
 
-Reads splits/splits.json, runs Grounding DINO on every image, saves the
-best-confidence crop to data/crops/{split}/{file_name}, and writes
-splits/crop_splits.json with updated image_path fields.
+Reads splits/splits.json, runs Grounding DINO on every image with the
+main_category-specific dino_prompt, saves the best-confidence crop to
+data/crops/{split}/{file_name}, and writes splits/crop_splits.json with:
+  - image_path: path to the saved crop (or full image on fallback)
+  - dino_meta : detection metadata (success, score, box, label_en, image_size)
 
-Both Exp 1 (DINO+CLIP zero-shot) and Exp 2 (Linear Probe) use the same
-pre-extracted crops to ensure a fair comparison.
+dino_meta is the contract for downstream evaluation (02_dino_eval.py) and
+is forwarded transparently by the CLIP pipeline (it ignores the field).
 
 Usage:
     python 01_extract_crops.py
+    python 01_extract_crops.py --crop-dir data/crops --out splits/crop_splits.json
 """
 import argparse
-import json
 from pathlib import Path
+
+from PIL import Image
 
 from config import CATEGORY_CONFIG
 from src.dataset import SampleRecord, load_splits, save_splits
@@ -23,7 +27,7 @@ from src.dino import DINODetector
 def parse_args():
     p = argparse.ArgumentParser(description="Extract DINO crops for all split records")
     p.add_argument("--splits", type=Path, default=Path("splits/splits.json"))
-    p.add_argument("--crop-dir", type=Path, default=Path("/data/trash-data/crops"))
+    p.add_argument("--crop-dir", type=Path, default=Path("data/crops"))
     p.add_argument("--out", type=Path, default=Path("splits/crop_splits.json"))
     return p.parse_args()
 
@@ -42,45 +46,74 @@ def main():
     crop_splits: dict[str, list[SampleRecord]] = {}
     total = sum(len(v) for v in splits.values())
     done = 0
-    fallback_counts: dict[str, int] = {}
+    summary: dict[str, dict[str, int]] = {}
 
     for split_name, records in splits.items():
         out_dir = args.crop_dir / split_name
         out_dir.mkdir(parents=True, exist_ok=True)
         updated: list[SampleRecord] = []
-        fallbacks = 0
+        n_success = 0
+        n_fallback = 0
+        n_cached = 0
+        n_error = 0
 
         for rec in records:
             done += 1
             crop_path = out_dir / rec.file_name
 
             if crop_path.exists():
+                # Crop already on disk from a prior run. Skip detection to save
+                # time but mark dino_meta as None so 02_dino_eval can flag the
+                # gap. Delete the crop dir for a clean stat run.
                 updated.append(SampleRecord(
                     image_path=str(crop_path),
                     file_name=rec.file_name,
                     main_category=rec.main_category,
                     sub_category=rec.sub_category,
                     group_id=rec.group_id,
+                    dino_meta=None,
                 ))
-                print(f"[{done}/{total}] skip (exists) {split_name}/{rec.file_name}")
+                n_cached += 1
+                print(f"[{done}/{total}] skip (cached) {split_name}/{rec.file_name}")
                 continue
 
-            from PIL import Image
             try:
                 image = Image.open(rec.image_path).convert("RGB")
             except Exception as e:
                 print(f"[{done}/{total}] ERROR open {rec.image_path}: {e}")
-                updated.append(rec)
+                updated.append(SampleRecord(
+                    image_path=rec.image_path,
+                    file_name=rec.file_name,
+                    main_category=rec.main_category,
+                    sub_category=rec.sub_category,
+                    group_id=rec.group_id,
+                    dino_meta={
+                        "detection_success": False,
+                        "fallback": True,
+                        "score": None,
+                        "box": None,
+                        "label_en": None,
+                        "image_size": None,
+                        "error": f"open_failed:{e}",
+                    },
+                ))
+                n_error += 1
                 continue
 
-            dino_prompt = CATEGORY_CONFIG.get(rec.main_category, {}).get("dino_prompt", "object")
-            crop, is_fallback = detector.best_crop(image, dino_prompt)
+            dino_prompt = CATEGORY_CONFIG.get(rec.main_category, {}).get(
+                "dino_prompt", "object"
+            )
+            crop, meta = detector.best_crop(image, dino_prompt)
 
-            if is_fallback:
-                fallbacks += 1
-                print(f"[{done}/{total}] {split_name}/{rec.file_name} → fallback (no detection)")
+            if meta["fallback"]:
+                n_fallback += 1
+                print(f"[{done}/{total}] {split_name}/{rec.file_name} → fallback")
             else:
-                print(f"[{done}/{total}] {split_name}/{rec.file_name} → crop saved")
+                n_success += 1
+                print(
+                    f"[{done}/{total}] {split_name}/{rec.file_name} "
+                    f"→ crop (score={meta['score']:.3f})"
+                )
 
             crop.save(crop_path)
             updated.append(SampleRecord(
@@ -89,17 +122,34 @@ def main():
                 main_category=rec.main_category,
                 sub_category=rec.sub_category,
                 group_id=rec.group_id,
+                dino_meta=meta,
             ))
 
         crop_splits[split_name] = updated
-        fallback_counts[split_name] = fallbacks
+        summary[split_name] = {
+            "total": len(updated),
+            "success": n_success,
+            "fallback": n_fallback,
+            "cached": n_cached,
+            "error": n_error,
+        }
 
     save_splits(args.out, crop_splits)
     print(f"\n[SAVED] {args.out}")
-    for split_name, recs in crop_splits.items():
-        fb = fallback_counts.get(split_name, 0)
-        print(f"  {split_name}: {len(recs)} records, {fb} fallbacks (full image used)")
-    print("[NOTE] crop_splits.json is fixed. Do not regenerate unless splits.json changes.")
+    for split_name, stats in summary.items():
+        det_rate = (
+            stats["success"] / max(1, stats["success"] + stats["fallback"])
+        )
+        print(
+            f"  {split_name}: total={stats['total']}, "
+            f"success={stats['success']}, fallback={stats['fallback']}, "
+            f"cached={stats['cached']}, error={stats['error']}, "
+            f"detection_rate={det_rate:.1%} (excl. cached)"
+        )
+    print(
+        "[NOTE] crop_splits.json is fixed. To regenerate, delete the crop "
+        "directory AND splits/crop_splits.json."
+    )
 
 
 if __name__ == "__main__":
