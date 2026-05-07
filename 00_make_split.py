@@ -18,7 +18,7 @@ from src.dataset import distribution, grouped_stratified_split, load_records, sa
 
 def parse_args():
     p = argparse.ArgumentParser(description="Create fixed train/val/test split")
-    p.add_argument("--data-root", type=Path, default=Path("data/trash-data"))
+    p.add_argument("--data-root", type=Path, default=Path("/data/trash-data"))
     p.add_argument("--out", type=Path, default=Path("splits/splits.json"))
     p.add_argument("--train", type=float, default=0.7)
     p.add_argument("--val", type=float, default=0.15)
