@@ -28,6 +28,11 @@ def parse_args():
         help="Keep at most N records per sub_category (randomly sampled). "
              "Set to 0 to disable (use all records).",
     )
+    p.add_argument(
+        "--no-verify-images", action="store_true",
+        help="Skip PIL-decode verification for each image (much faster on "
+             "slow disks; safe when the dataset is pre-validated).",
+    )
     return p.parse_args()
 
 
@@ -43,7 +48,12 @@ def main():
 
     include = list(CATEGORY_CONFIG.keys())
     print(f"[INFO] Loading records for: {include}")
-    records = load_records(csv_dir=csv_dir, image_dir=image_dir, include_categories=include)
+    records = load_records(
+        csv_dir=csv_dir,
+        image_dir=image_dir,
+        include_categories=include,
+        verify_images=not args.no_verify_images,
+    )
 
     if not records:
         raise RuntimeError(

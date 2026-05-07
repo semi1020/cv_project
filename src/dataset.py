@@ -52,15 +52,24 @@ class SampleRecord:
     main_category: str
     sub_category: str   # normalized full label, e.g. "소파_1인용"
     group_id: str
+    # Optional GDINO metadata populated by 01_extract_crops.py.
+    # Schema: {"detection_success": bool, "fallback": bool,
+    #          "score": float|None, "box": [x0,y0,x1,y1]|None,
+    #          "label_en": str|None, "image_size": [W,H]}
+    # CLIP code may safely ignore this field.
+    dino_meta: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "image_path": self.image_path,
             "file_name": self.file_name,
             "main_category": self.main_category,
             "sub_category": self.sub_category,
             "group_id": self.group_id,
         }
+        if self.dino_meta is not None:
+            d["dino_meta"] = self.dino_meta
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "SampleRecord":
@@ -70,6 +79,7 @@ class SampleRecord:
             main_category=d["main_category"],
             sub_category=d["sub_category"],
             group_id=d["group_id"],
+            dino_meta=d.get("dino_meta"),
         )
 
 
@@ -77,6 +87,8 @@ def load_records(
     csv_dir: Path,
     image_dir: Path,
     include_categories: list[str] | None = None,
+    verify_images: bool = True,
+    progress: bool = True,
 ) -> list[SampleRecord]:
     """Load all CSVs from csv_dir and match images from image_dir.
 
@@ -84,40 +96,54 @@ def load_records(
         csv_dir: directory containing *.csv annotation files
         image_dir: flat directory containing all JPG images
         include_categories: list of main_category values to include (None = all)
+        verify_images: if True, open each image with PIL to confirm it decodes
+            (~ms per image; on slow disks this dominates runtime). Set False
+            when the dataset is already known to be valid.
+        progress: show a tqdm progress bar over CSV rows when tqdm is available.
     """
     include_set = set(include_categories) if include_categories else None
     records: list[SampleRecord] = []
 
+    rows: list[dict] = []
     for csv_path in sorted(csv_dir.glob("*.csv")):
         with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                main = normalize_label(row.get("main_category", ""))
-                if not main:
-                    continue
-                if include_set and main not in include_set:
-                    continue
+            rows.extend(csv.DictReader(f))
 
-                file_name = row.get("file_name", "").strip()
-                if not file_name:
-                    continue
+    iterable = rows
+    if progress:
+        try:
+            from tqdm import tqdm
+            iterable = tqdm(rows, desc="load_records", unit="row")
+        except ImportError:
+            pass
 
-                img_path = image_dir / file_name
-                if not img_path.exists():
-                    continue
-                if not _is_readable(img_path):
-                    continue
+    for row in iterable:
+        main = normalize_label(row.get("main_category", ""))
+        if not main:
+            continue
+        if include_set and main not in include_set:
+            continue
 
-                sub = normalize_label(row.get("sub_category", ""))
-                group_id = _extract_group_id(file_name)
+        file_name = row.get("file_name", "").strip()
+        if not file_name:
+            continue
 
-                records.append(SampleRecord(
-                    image_path=str(img_path),
-                    file_name=file_name,
-                    main_category=main,
-                    sub_category=sub,
-                    group_id=group_id,
-                ))
+        img_path = image_dir / file_name
+        if not img_path.exists():
+            continue
+        if verify_images and not _is_readable(img_path):
+            continue
+
+        sub = normalize_label(row.get("sub_category", ""))
+        group_id = _extract_group_id(file_name)
+
+        records.append(SampleRecord(
+            image_path=str(img_path),
+            file_name=file_name,
+            main_category=main,
+            sub_category=sub,
+            group_id=group_id,
+        ))
 
     return records
 
