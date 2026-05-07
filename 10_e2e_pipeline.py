@@ -38,7 +38,7 @@ stage_b.fallback == true  → main predicted but per-class re-detect failed;
                             crop_path holds the full image copy.
 
 Usage:
-    python 10_e2e_pipeline.py --images data/trash-data/image --limit 50
+    python 10_e2e_pipeline.py --images /data/trash-data/image --limit 50
     python 10_e2e_pipeline.py --splits splits/splits.json --split test
 """
 from __future__ import annotations
