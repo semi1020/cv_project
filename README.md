@@ -114,7 +114,7 @@ python 01_extract_crops.py
 
 ```json
 {
-  "image_path": "data/crops/test/abc.jpg",
+  "image_path": "/data/trash-data/crops/test/abc.jpg",
   "file_name": "abc.jpg",
   "main_category": "소파",
   "sub_category": "소파_1인용",

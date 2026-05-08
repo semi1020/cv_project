@@ -168,8 +168,8 @@ KOR_TO_EN: dict[str, list[str]] = {
 
 # Sub_categories with CSV count >= 100 (Sheet2). Single source of truth for
 # the 2026-05-06 selection rule. Strings match the CSV sub_category column
-# verbatim (note literal spaces in e.g. "소파_ 3인용이상" and "컴퓨터_본 체").
-# Partner CLIP code can import this set as the universe of valid sub labels.
+# All strings are normalized (spaces removed, cm→㎝) to match
+# normalize_label() output in splits.json and CATEGORY_CONFIG keys.
 ACTIVE_SUBS: set[str] = {
     # 의자 (3 subs)
     "의자_편의용(안락,흔들,식탁)", "의자_사무용", "의자_보조,간이",
@@ -186,7 +186,7 @@ ACTIVE_SUBS: set[str] = {
     # 에어컨및온풍기 (3)
     "에어컨및온풍기_1.0㎡이상", "에어컨및온풍기_1.0㎡미만", "에어컨및온풍기_0.5㎡미만",
     # 소파 (5)
-    "소파_ 3인용이상", "소파_ 1인용", "소파_ 2인용", "소파_카우치", "소파_스툴,코너",
+    "소파_3인용이상", "소파_1인용", "소파_2인용", "소파_카우치", "소파_스툴,코너",
     # 가방 (2)
     "가방_캐리어", "가방_골프가방",
     # 실내조명등기구 (2)
@@ -226,7 +226,7 @@ ACTIVE_SUBS: set[str] = {
     # 의료기 (1)
     "의료기_일반",
     # 컴퓨터 (2)
-    "컴퓨터_모니터", "컴퓨터_본 체",
+    "컴퓨터_모니터", "컴퓨터_본체",
     # 거울 (2)
     "거울(액자형)_1㎡미만", "거울(액자형)_1㎡이상",
     # 옷걸이 (1)
