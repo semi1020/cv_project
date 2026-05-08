@@ -15,7 +15,11 @@ from pathlib import Path
 from config import CATEGORY_CONFIG
 from src.dataset import distribution, grouped_stratified_split, load_records, sample_per_category, save_splits
 
-
+# 수정: CATEGORY_CONFIG에서 active sub_category 전체 집합 구축
+ACTIVE_SUB_KEYS: set[str] = set()
+for _main, _cfg in CATEGORY_CONFIG.items():
+    ACTIVE_SUB_KEYS.update(_cfg["sub_categories"].keys())
+    
 def parse_args():
     p = argparse.ArgumentParser(description="Create fixed train/val/test split")
     p.add_argument("--data-root", type=Path, default=Path("/data/trash-data"))
@@ -55,12 +59,21 @@ def main():
         verify_images=not args.no_verify_images,
     )
 
+    # 수정: active sub_category만 필터 (inactive sub 제거)
+    before = len(records)
+    records = [r for r in records if r.sub_category in ACTIVE_SUB_KEYS]
+    dropped = before - len(records)
+    if dropped:
+        print(f"[INFO] Dropped {dropped} records with inactive sub_category "
+              f"({before} -> {len(records)})")
+        
     if not records:
         raise RuntimeError(
-            f"No records found. Check that {csv_dir} and {image_dir} exist and are populated."
+            "No records remain after filtering by active sub_categories. "
+            "Check CATEGORY_CONFIG sub_categories keys match CSV sub_category values."
         )
 
-    print(f"[INFO] Total records: {len(records)}")
+    print(f"[INFO] Total records (active subs only): {len(records)}")
     sub_dist = distribution(records)
     for label, cnt in sorted(sub_dist.items()):
         print(f"  {label}: {cnt}")
