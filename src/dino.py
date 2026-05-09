@@ -5,8 +5,8 @@ import torch
 from PIL import Image
 
 MODEL_ID = "IDEA-Research/grounding-dino-base"
-BOX_THRESHOLD = 0.35
-TEXT_THRESHOLD = 0.20
+BOX_THRESHOLD = 0.25
+TEXT_THRESHOLD = 0.15
 NMS_IOU_THRESHOLD = 0.50
 CROP_PAD_RATIO = 0.15
 BERT_TOKEN_LIMIT = 256
