@@ -40,6 +40,7 @@ stage_b.fallback == true  → main predicted but per-class re-detect failed;
 Usage:
     python 10_e2e_pipeline.py --images /data/trash-data/image --limit 50
     python 10_e2e_pipeline.py --splits splits/splits.json --split test
+    python 10_e2e_pipeline.py --splits splits/splits.json --split test --box-threshold 0.30 --text-threshold 0.20
 """
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ from PIL import Image
 
 from config import CATEGORY_CONFIG
 from src.dataset import load_splits
-from src.dino import DINODetector
+from src.dino import DINODetector, BOX_THRESHOLD, TEXT_THRESHOLD
 from src.label_mapping import (
     EN_ALIAS_TO_KOR,
     KOR_TO_EN,
@@ -82,10 +83,15 @@ def _resolve_main(label_en: str | None) -> str | None:
     return kor if kor in KEEP_MAINS else None
 
 
+# ★ 수정 1: box_threshold, text_threshold 파라미터 추가
 def _stage_a(detector: DINODetector, image: Image.Image, prompt: str,
-             top_k: int) -> dict:
+             top_k: int,
+             box_threshold: float = BOX_THRESHOLD,
+             text_threshold: float = TEXT_THRESHOLD) -> dict:
     """Multi-class detection. Returns prediction dict (see schema in module docstring)."""
-    dets = detector.detect(image, prompt, with_labels=True)[:top_k]
+    dets = detector.detect(image, prompt, with_labels=True,
+                           box_threshold=box_threshold,
+                           text_threshold=text_threshold)[:top_k]
     if not dets:
         return {
             "pred_main": None, "label_en": None, "score": None, "box": None,
@@ -171,6 +177,7 @@ def _iter_image_paths(args) -> list[tuple[str, str]]:
     return [(p.name, str(p)) for p in paths]
 
 
+# ★ 수정 2: parse_args에 --box-threshold, --text-threshold 추가
 def parse_args():
     p = argparse.ArgumentParser()
     src = p.add_mutually_exclusive_group(required=False)
@@ -184,6 +191,10 @@ def parse_args():
                    help="cap number of images (smoke test)")
     p.add_argument("--top-k", type=int, default=5,
                    help="top-K detections to keep in stage_a.topk")
+    p.add_argument("--box-threshold", type=float, default=None,
+                   help="Override Stage A box_threshold (default: dino.py BOX_THRESHOLD)")
+    p.add_argument("--text-threshold", type=float, default=None,
+                   help="Override Stage A text_threshold (default: dino.py TEXT_THRESHOLD)")
     p.add_argument("--out", type=Path, default=Path("outputs/e2e_predictions.jsonl"))
     p.add_argument("--crop-dir", type=Path, default=Path("outputs/crops_e2e"))
     return p.parse_args()
@@ -201,9 +212,18 @@ def main():
     detector = DINODetector()
     prompt, active_mains = _build_stage_a_prompt()
     n_tokens = detector.verify_prompt_budget(prompt)
+
+    # ★ 수정 3: threshold 결정 및 로그 출력
+    bt = args.box_threshold if args.box_threshold is not None else BOX_THRESHOLD
+    tt = args.text_threshold if args.text_threshold is not None else TEXT_THRESHOLD
+
     print(
         f"[info] Stage A prompt: {len(active_mains)} active mains, "
         f"{n_tokens} tokens (limit 256)",
+        file=sys.stderr,
+    )
+    print(
+        f"[info] Stage A thresholds: box={bt}, text={tt}",
         file=sys.stderr,
     )
     print(f"[info] images: {len(items)}", file=sys.stderr)
@@ -222,7 +242,8 @@ def main():
                 ensure_ascii=False) + "\n")
             continue
 
-        a = _stage_a(detector, image, prompt, args.top_k)
+        a = _stage_a(detector, image, prompt, args.top_k,
+                     box_threshold=bt, text_threshold=tt)
         if a["pred_main"]:
             n_main_ok += 1
             crop_path = args.crop_dir / file_name

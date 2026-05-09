@@ -268,7 +268,7 @@ ACTIVE_MAIN: set[str] = {
 # - sub_categories: from _ALL_CATEGORIES, filtered to ACTIVE_SUBS
 CATEGORY_CONFIG: dict[str, dict] = {
     'TV장식장(거실장)': {
-        "dino_prompt": 'tv stand . tv cabinet .',
+        "dino_prompt": 'tv stand . media cabinet .',
         "sub_categories": {
             'TV장식장(거실장)_가로90㎝이상': 'a wide TV stand or media cabinet at least 90 centimeters wide',
             'TV장식장(거실장)_단순받침대': 'a simple flat TV base or stand without cabinet storage',
@@ -289,7 +289,7 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '공기청정기및가습기': {
-        "dino_prompt": 'air purifier . humidifier . tower purifier .',
+        "dino_prompt": 'air purifier . humidifier . tower air purifier . round top air purifier .',
         "sub_categories": {
             '공기청정기및가습기_높이1m미만': 'an air purifier or humidifier less than 1 meter tall',
             '공기청정기및가습기_높이1m이상': 'a tall standing air purifier or humidifier at least 1 meter in height',
@@ -304,7 +304,7 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '상': {
-        "dino_prompt": 'low table . korean floor table .',
+        "dino_prompt": 'low table . small folding table .',
         "sub_categories": {
             '상_4인용미만': 'a small low Korean dining table seating fewer than 4 people',
             '상_4인용이상': 'a large low Korean dining table seating 4 or more people',
@@ -329,7 +329,7 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '소파': {
-        "dino_prompt": 'sofa . couch .',
+        "dino_prompt": 'upholstered sofa . large padded couch .',
         "sub_categories": {
             '소파_1인용': 'a small narrow single-seat armchair with armrests on both sides and a short seat width suitable for only one person',
             '소파_2인용': 'a medium-width two-seat sofa just wide enough for two adults, with two seat cushions and a compact frame',
@@ -352,7 +352,7 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '식탁': {
-        "dino_prompt": 'dining table .',
+        "dino_prompt": 'dining table . dining table set .',
         "sub_categories": {
             '식탁_4인용이상(일반)': 'a standard dining table seating 4 or more people',
         },
@@ -365,7 +365,7 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '에어컨및온풍기': {
-        "dino_prompt": 'air conditioner . wall ac unit .',
+        "dino_prompt": 'air conditioner . wall ac unit . standing air conditioner .',
         "sub_categories": {
             '에어컨및온풍기_0.5㎡미만': 'an air conditioner or heater with face area under 0.5 square meters',
             '에어컨및온풍기_1.0㎡미만': 'an air conditioner or heater with face area between 0.5 and 1 square meters',
@@ -373,19 +373,19 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '오락기': {
-        "dino_prompt": 'arcade machine . game machine .',
+        "dino_prompt": 'arcade cabinet . coin operated game machine .',
         "sub_categories": {
             '오락기_소형': 'a small arcade or tabletop game machine',
         },
     },
     '옷걸이': {
-        "dino_prompt": 'coat rack . clothes hanger stand .',
+        "dino_prompt": 'coat rack . standing coat rack .',
         "sub_categories": {
             '옷걸이_모든규격': 'a coat rack or standing clothes hanger of any size',
         },
     },
     '의료기': {
-        "dino_prompt": 'medical device .',
+        "dino_prompt": 'wheelchair . medical walker . mobility aid .',
         "sub_categories": {
             '의료기_일반': 'a standard medical device without stand',
         },
@@ -425,7 +425,7 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '책상': {
-        "dino_prompt": 'desk . writing desk .',
+        "dino_prompt": 'desk . office desk . computer desk .',
         "sub_categories": {
             '책상_가로120㎝미만': 'a desk less than 120 centimeters wide',
         },
@@ -464,14 +464,14 @@ CATEGORY_CONFIG: dict[str, dict] = {
         },
     },
     '형광등기구': {
-        "dino_prompt": 'fluorescent light .',
+        "dino_prompt": 'fluorescent tube light . long fluorescent lamp .',
         "sub_categories": {
             '형광등기구_길이1m미만': 'a fluorescent light fixture less than 1 meter long',
             '형광등기구_길이1m이상': 'a fluorescent light fixture at least 1 meter long',
         },
     },
     '화장대': {
-        "dino_prompt": 'dressing table . vanity table .',
+        "dino_prompt": 'vanity with mirror . dressing table with mirror .',
         "sub_categories": {
             '화장대_가로90㎝미만': 'a vanity dresser or dressing table less than 90 centimeters wide',
         },
