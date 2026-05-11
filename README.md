@@ -2,21 +2,33 @@
 
 이미지 1장 → main_category(31종) + sub_category(54종) 자동 분류 → 배출수수료 안내.
 
-## 시스템 개요 (2-stage)
+## 시스템 개요 (Pipeline v2 — 3-stage open-vocabulary)
 
 ```
-                 ┌──────────────────────────────┐
-                 │        E2E inference         │
-                 │   10_e2e_pipeline.py         │
-                 └──────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼                               ▼
-    [Stage A] GDINO            [Stage B] GDINO + CLIP
-    single-prompt (31)          per-class crop → sub
-    main_category 예측           main별 dino_prompt
-                                 → CLIP sub 분류
+                  ┌─────────────────────────────────────┐
+                  │           E2E inference v2          │
+                  │       11_e2e_pipeline_v2.py         │
+                  └─────────────────────────────────────┘
+                                  │
+        ┌─────────────────────────┼─────────────────────────┐
+        ▼                         ▼                         ▼
+  [Stage A] CLIP-family    [Stage B] GDINO         [Stage C] CLIP-family
+  zero-shot (31 main)      per-class single-prompt zero-shot (per-main subs)
+  → main_category          → crop                  → sub_category
+  (CLIP / MetaCLIP /       (선택: --skip-stage-b)  (Stage A와 동일 모델
+   SigLIP / SigLIP2)                                  재사용)
 ```
+
+**현재 baseline (test 3927장):** SigLIP2-L-512 zero-shot, Stage A **89.2%** main accuracy.
+실험 이력 / 의사결정 / 모델 비교 → [docs/PIPELINE_HISTORY.md](docs/PIPELINE_HISTORY.md).
+
+### 설계 원칙
+1. **Open-vocabulary 우선** — 새 클래스 추가는 `src/label_mapping.py` 한 줄 수정 + `tools/sync_label_mapping.py` 실행으로 완료. 재학습 불필요.
+2. **GDINO + CLIP 모두 zero-shot 활용** — 둘 다 open-vocab 모델. GDINO는 학습된 task인 phrase grounding (Stage B)으로만 사용.
+3. **Linear probe는 보조 도구** — 사이즈/규격 sub처럼 zero-shot 본질적 한계 영역에 한정 검토.
+
+### 레거시 파이프라인
+[10_e2e_pipeline.py](10_e2e_pipeline.py)는 GDINO single-prompt를 Stage A로 쓰던 v1 (main 57%). 비교용으로 보존, 신규 작업은 v2 사용.
 
 학습/평가 흐름은 GT main을 가정한 별도 경로(`01_extract_crops.py` → `02_dino_eval.py` → `exp1`/`exp2`)를 사용합니다.
 
@@ -24,26 +36,35 @@
 
 ```
 cv_project/
-├── 00_make_split.py        Step 0: splits/splits.json
-├── 01_extract_crops.py     Step 1: splits/crop_splits.json + data/crops/
-├── 02_dino_eval.py         Step 2: results/dino_eval/ (BBOX 평가)        [신규]
-├── 10_e2e_pipeline.py      E2E   : outputs/e2e_predictions.jsonl        [신규]
-├── exp1_zeroshot.py        실험 1: CLIP only vs DINO+CLIP
-├── exp2_train.py           실험 2: Linear Probe 학습
-├── exp2_evaluate.py        실험 2: 평가
-├── config.py               자동 생성 — 직접 편집 금지
+├── 00_make_split.py            Step 0: splits/splits.json
+├── 01_extract_crops.py         Step 1: splits/crop_splits.json + data/crops/
+├── 02_dino_eval.py             Step 2: results/dino_eval/ (BBOX 평가)
+├── 10_e2e_pipeline.py          [LEGACY] Pipeline v1 (GDINO single-prompt Stage A, main 57%)
+├── 11_e2e_pipeline_v2.py       [현재 권장] Pipeline v2 (CLIP-A + GDINO-B + CLIP-C)
+├── exp1_zeroshot.py            실험 1: CLIP only vs DINO+CLIP (sub 분류, GT main 가정)
+├── exp2_train.py               실험 2: Linear Probe 학습 (sub용)
+├── exp2_evaluate.py            실험 2: 평가
+├── exp_clip_main.py            실험: open-vocab main 분류 (CLIP/MetaCLIP/SigLIP/SigLIP2 swap)
+├── config.py                   자동 생성 — 직접 편집 금지
 ├── tools/
-│   └── sync_label_mapping.py   src/label_mapping.py → config.py 변환    [신규]
+│   ├── sync_label_mapping.py       src/label_mapping.py → config.py 변환
+│   ├── run_experiment.sh           Pipeline v1 자동 실행/평가 (legacy 호환)
+│   ├── eval_clip_main.sh           main 분류 평가 (v3 포맷 출력)
+│   └── eval_e2e_v2.sh              Pipeline v2 E2E 평가 (main + sub)
 ├── src/
-│   ├── label_mapping.py    KOR_TO_EN, ACTIVE_SUBS, KEEP_MAINS (단일 소스)[신규]
-│   ├── dataset.py          SampleRecord(+dino_meta), split 유틸
-│   ├── dino.py             Grounding DINO base wrapper
-│   ├── clip_zeroshot.py    CLIP zero-shot
-│   ├── linear_probe.py     CLIP + Linear head
-│   └── metrics.py          평가 지표
-├── splits/                 splits.json (git tracked), crop_splits.json (gitignored)
-├── outputs/                e2e_predictions.jsonl, crops_e2e/    (gitignored)
-├── results/                exp1/, exp2/, dino_eval/             (gitignored)
+│   ├── label_mapping.py        KOR_TO_EN, ACTIVE_SUBS, KEEP_MAINS (단일 소스)
+│   ├── dataset.py              SampleRecord(+dino_meta), split 유틸
+│   ├── dino.py                 Grounding DINO base wrapper
+│   ├── clip_zeroshot.py        Open-vocab zero-shot (CLIP/MetaCLIP/SigLIP/SigLIP2)
+│   ├── linear_probe.py         CLIP + Linear head (보조 도구)
+│   ├── prompt_chunks.py        [DEPRECATED] 청킹 모드 (-3.5pp/2x slow → 폐기, 보존)
+│   └── metrics.py              평가 지표
+├── docs/
+│   └── PIPELINE_HISTORY.md     실험/의사결정/아키텍처 변천 이력
+├── splits/                     splits.json (git tracked), crop_splits.json (gitignored)
+├── outputs/                    e2e_*.jsonl, crops_e2e/         (gitignored)
+├── results/                    exp1/, exp2/, dino_eval/        (gitignored)
+├── experiments/                실험 로그/eval                  (gitignored — 산출물)
 └── requirements.txt
 ```
 
@@ -147,45 +168,72 @@ python 02_dino_eval.py --split test
 ### Step 4 — CLIP 실험 (CLIP 담당)
 
 ```bash
-python exp1_zeroshot.py --split test         # CLIP only vs DINO+CLIP
-python exp2_train.py                         # Linear Probe 학습
+python exp1_zeroshot.py --split test         # Sub: CLIP only vs DINO+CLIP (GT main 가정)
+python exp2_train.py                         # Sub: Linear Probe 학습 (보조 도구)
 python exp2_evaluate.py --checkpoint runs/exp2/<run_id>/best.pt
+
+# Open-vocab main 분류 모델 비교 (CLIP/MetaCLIP/SigLIP/SigLIP2)
+python exp_clip_main.py --split test --model-id google/siglip2-large-patch16-512
+bash tools/eval_clip_main.sh clip_main_canonical_<model_short> outputs/<...>.jsonl
 ```
 
-결과: `results/exp1/`, `results/exp2/`.
+결과: `results/exp1/`, `results/exp2/`, `outputs/clip_main_*.jsonl`.
 
 ### E2E inference (GT 없는 입력)
 
+#### 권장 — Pipeline v2 (CLIP-A → GDINO-B → CLIP-C)
+
 ```bash
-python 10_e2e_pipeline.py --splits splits/splits.json --split test --limit 30
-python 10_e2e_pipeline.py --images /data/trash-data/image --limit 100
+# 기본 (Stage B 포함, SigLIP2-L-512 baseline)
+python 11_e2e_pipeline_v2.py --splits splits/splits.json --split test \
+  --model-id google/siglip2-large-patch16-512
+
+# Fast 모드 (Stage B 생략, full image로 Stage C 직행)
+python 11_e2e_pipeline_v2.py --splits splits/splits.json --split test \
+  --model-id google/siglip2-large-patch16-512 --skip-stage-b
+
+# 모델 swap만으로 다른 백본 비교 — 학습 코드 변경 없음 (open-vocab)
+python 11_e2e_pipeline_v2.py --splits splits/splits.json --split test \
+  --model-id facebook/metaclip-l14-fullcc2.5b
+python 11_e2e_pipeline_v2.py --splits splits/splits.json --split test \
+  --model-id openai/clip-vit-large-patch14
 ```
 
-Stage A (single-prompt 31 클래스 GDINO) + Stage B (예측된 main의 per-class crop). 출력 `outputs/e2e_predictions.jsonl`:
+지원 모델 (HF에서 가중치 자동 다운로드):
+- `openai/clip-vit-large-patch14` (CLIP-L, 428M, 224px)
+- `facebook/metaclip-l14-fullcc2.5b` (MetaCLIP-L, 428M, 224px)
+- `google/siglip-large-patch16-384` (SigLIP-L, 652M, 384px)
+- `google/siglip2-large-patch16-512` (**SigLIP2-L-512, 652M, 512px — 현재 baseline**)
+- 기타 SigLIP/SigLIP2/EVA-CLIP/OpenCLIP 변형 가능
 
+출력 `outputs/e2e_v2_*.jsonl`:
 ```json
 {
   "file_name": "...",
   "image_size": [W, H],
-  "stage_a": {
-    "pred_main": "소파" | null,
-    "label_en": "sofa" | null,
-    "score": 0.78 | null,
-    "box": [x0,y0,x1,y1] | null,
-    "topk": [{"label_en","label_kor","score","box"}, ...]
-  },
-  "stage_b": {
-    "crop_path": "outputs/crops_e2e/<file>" | null,
-    "dino_prompt": "...",
-    "score": 0.74 | null,
-    "box": [x0,y0,x1,y1] | null,
-    "fallback": true|false|null,
-    "label_en": "..." | null
-  }
+  "stage_a": {"pred_main": "소파" | null, "score": 0.91, "topk": [...]},
+  "stage_b": {"crop_path": "outputs/crops_e2e_v2/<file>" | null,
+              "dino_prompt": "...", "score": 0.74, "box": [...], "fallback": false},
+  "stage_c": {"pred_sub": "소파_1인용" | null, "score": 0.82, "all_scores": {...}},
+  "model_id": "google/siglip2-large-patch16-512",
+  "stage_c_model_id": "google/siglip2-large-patch16-512",
+  "stage_a_mode": "canonical",
+  "skip_stage_b": false
 }
 ```
 
-`stage_a.pred_main == null` → Stage B skip. `stage_b.fallback == true` → main 예측은 됐으나 per-class detection 실패 (전체 이미지 crop).
+평가:
+```bash
+bash tools/eval_e2e_v2.sh <exp_name> outputs/e2e_v2_<...>.jsonl
+```
+
+#### 레거시 — Pipeline v1 (GDINO single-prompt)
+
+```bash
+python 10_e2e_pipeline.py --splits splits/splits.json --split test --limit 30
+```
+
+Stage A를 GDINO single-prompt로 사용한 옛 파이프라인 (main 57%). 비교용으로 보존.
 
 ---
 
@@ -208,5 +256,6 @@ CSV 위치: `/data/trash-data/csv/` (4개 파일, 30,099행).
 ## 담당 영역
 
 - **GDINO**: `src/dino.py`, `src/label_mapping.py`, `01_extract_crops.py`, `02_dino_eval.py`, `10_e2e_pipeline.py`, `tools/sync_label_mapping.py`
-- **CLIP**: `src/clip_zeroshot.py`, `src/linear_probe.py`, `exp1_zeroshot.py`, `exp2_*.py`
-- **공유**: `00_make_split.py`, `src/dataset.py`, `src/metrics.py`, `config.py`(자동 생성)
+- **CLIP**: `src/clip_zeroshot.py`, `src/linear_probe.py`, `exp1_zeroshot.py`, `exp2_*.py`, `exp_clip_main.py`
+- **Pipeline v2 (공유)**: `11_e2e_pipeline_v2.py`, `tools/eval_e2e_v2.sh`, `tools/eval_clip_main.sh` — Stage A/C는 CLIP 담당, Stage B는 GDINO 담당
+- **공유 인프라**: `00_make_split.py`, `src/dataset.py`, `src/metrics.py`, `config.py`(자동 생성), `docs/PIPELINE_HISTORY.md`

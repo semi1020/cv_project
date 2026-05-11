@@ -9,6 +9,7 @@ outputs/
 # Training / evaluation outputs
 results/
 runs/
+experiments/
 
 # Python caches and virtual environments
 __pycache__/

@@ -1,46 +1,13 @@
 """
 E2E inference pipeline (no GT main_category).
 
-This is the runtime path used when a user uploads an image and we don't yet
-know its main_category — opposite of 01_extract_crops.py which assumes GT main.
-
 Two stages:
-  Stage A — Multi-class single-prompt GDINO over all ACTIVE_MAIN classes.
-            Top-1 detection's English alias → Korean main_category.
-            Token budget against BERT 256 is verified at startup.
-
-  Stage B — Re-run GDINO with the predicted main's per-class dino_prompt
-            (CATEGORY_CONFIG[main]["dino_prompt"]). Best box is extracted as a
-            crop and saved to disk for downstream CLIP sub-classification.
-
-Output (outputs/e2e_predictions.jsonl) — one line per image:
-  {
-    "file_name": "...",
-    "image_size": [W, H],
-    "stage_a": {
-      "pred_main": "소파" | null,
-      "label_en": "sofa" | null,
-      "score": 0.78 | null,
-      "box": [x0,y0,x1,y1] | null,
-      "topk": [{"label_en","label_kor","score","box"}, ...]
-    },
-    "stage_b": {
-      "crop_path": "outputs/crops_e2e/<file>" | null,
-      "dino_prompt": "...",
-      "score": 0.74 | null,
-      "box": [x0,y0,x1,y1] | null,
-      "fallback": bool | null
-    }
-  }
-
-stage_a.pred_main == null → Stage B skipped (no main predicted).
-stage_b.fallback == true  → main predicted but per-class re-detect failed;
-                            crop_path holds the full image copy.
+  Stage A — Multi-class single-prompt GDINO.
+  Stage B — Per-class GDINO re-detect + crop for CLIP.
 
 Usage:
-    python 10_e2e_pipeline.py --images /data/trash-data/image --limit 50
     python 10_e2e_pipeline.py --splits splits/splits.json --split test
-    python 10_e2e_pipeline.py --splits splits/splits.json --split test --box-threshold 0.30 --text-threshold 0.20
+    python 10_e2e_pipeline.py --splits splits/splits.json --split test --box-threshold 0.30
 """
 from __future__ import annotations
 
@@ -65,14 +32,12 @@ from src.label_mapping import (
 
 
 def _build_stage_a_prompt() -> tuple[str, list[str]]:
-    """Build the multi-class single-prompt and the list of active main_kor names."""
     prompt = build_gdino_text_prompt(canonical_only=True)
     active_mains = [m for m in KOR_TO_EN if m in KEEP_MAINS]
     return prompt, active_mains
 
 
 def _resolve_main(label_en: str | None) -> str | None:
-    """Resolve a detected English label back to a Korean active main."""
     if not label_en:
         return None
     s = label_en.lower().strip()
@@ -83,12 +48,10 @@ def _resolve_main(label_en: str | None) -> str | None:
     return kor if kor in KEEP_MAINS else None
 
 
-# ★ 수정 1: box_threshold, text_threshold 파라미터 추가
 def _stage_a(detector: DINODetector, image: Image.Image, prompt: str,
              top_k: int,
              box_threshold: float = BOX_THRESHOLD,
              text_threshold: float = TEXT_THRESHOLD) -> dict:
-    """Multi-class detection. Returns prediction dict (see schema in module docstring)."""
     dets = detector.detect(image, prompt, with_labels=True,
                            box_threshold=box_threshold,
                            text_threshold=text_threshold)[:top_k]
@@ -134,7 +97,6 @@ def _stage_a(detector: DINODetector, image: Image.Image, prompt: str,
 
 def _stage_b(detector: DINODetector, image: Image.Image, main_kor: str,
              crop_path: Path) -> dict:
-    """Per-class detection + crop. main_kor must be in CATEGORY_CONFIG."""
     entry = CATEGORY_CONFIG.get(main_kor)
     if entry is None:
         return {
@@ -159,7 +121,6 @@ def _stage_b(detector: DINODetector, image: Image.Image, main_kor: str,
 
 
 def _iter_image_paths(args) -> list[tuple[str, str]]:
-    """Yield (file_name, abs_path) tuples from either --images or --splits."""
     if args.splits is not None:
         splits = load_splits(args.splits)
         if args.split not in splits:
@@ -177,20 +138,19 @@ def _iter_image_paths(args) -> list[tuple[str, str]]:
     return [(p.name, str(p)) for p in paths]
 
 
-# ★ 수정 2: parse_args에 --box-threshold, --text-threshold 추가
 def parse_args():
     p = argparse.ArgumentParser()
     src = p.add_mutually_exclusive_group(required=False)
     src.add_argument("--images", type=Path,
-                     help="directory of images to run E2E on (no GT)")
+                     help="directory of images (no GT)")
     src.add_argument("--splits", type=Path,
                      help="splits.json (uses --split records as image source)")
     p.add_argument("--split", default="test",
-                   help="when --splits is given, which split to run (default: test)")
+                   help="which split to run (default: test)")
     p.add_argument("--limit", type=int, default=None,
                    help="cap number of images (smoke test)")
     p.add_argument("--top-k", type=int, default=5,
-                   help="top-K detections to keep in stage_a.topk")
+                   help="top-K detections in stage_a.topk")
     p.add_argument("--box-threshold", type=float, default=None,
                    help="Override Stage A box_threshold (default: dino.py BOX_THRESHOLD)")
     p.add_argument("--text-threshold", type=float, default=None,
@@ -210,22 +170,21 @@ def main():
         raise SystemExit("[error] no images to process")
 
     detector = DINODetector()
-    prompt, active_mains = _build_stage_a_prompt()
-    n_tokens = detector.verify_prompt_budget(prompt)
 
-    # ★ 수정 3: threshold 결정 및 로그 출력
+    # ── threshold 결정 ──
     bt = args.box_threshold if args.box_threshold is not None else BOX_THRESHOLD
     tt = args.text_threshold if args.text_threshold is not None else TEXT_THRESHOLD
 
+    # ── 프롬프트 준비 ──
+    prompt, active_mains = _build_stage_a_prompt()
+    n_tokens = detector.verify_prompt_budget(prompt)
     print(
         f"[info] Stage A prompt: {len(active_mains)} active mains, "
         f"{n_tokens} tokens (limit 256)",
         file=sys.stderr,
     )
-    print(
-        f"[info] Stage A thresholds: box={bt}, text={tt}",
-        file=sys.stderr,
-    )
+
+    print(f"[info] Stage A thresholds: box={bt}, text={tt}", file=sys.stderr)
     print(f"[info] images: {len(items)}", file=sys.stderr)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -242,8 +201,11 @@ def main():
                 ensure_ascii=False) + "\n")
             continue
 
+        # ── Stage A ──
         a = _stage_a(detector, image, prompt, args.top_k,
                      box_threshold=bt, text_threshold=tt)
+
+        # ── Stage B ──
         if a["pred_main"]:
             n_main_ok += 1
             crop_path = args.crop_dir / file_name

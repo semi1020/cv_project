@@ -1,14 +1,17 @@
 #!/bin/bash
 # tools/run_experiment.sh — 실험 실행 + 평가 + 기록 자동화
-# Usage: bash tools/run_experiment.sh <exp_name> [box_thr] [text_thr] [splits_file]
-# Example: bash tools/run_experiment.sh v4a 0.25 0.15 splits/splits.json
+# Usage: bash tools/run_experiment.sh <exp_name> [box_thr] [text_thr] [splits_file] [extra_args]
+# Example:
+#   bash tools/run_experiment.sh v3_baseline 0.25 0.15 splits/splits.json
+#   bash tools/run_experiment.sh v7_alias 0.25 0.15 splits/splits.json
 
 set -e
 
-EXP_NAME=${1:?"Usage: $0 <exp_name> [box_thr] [text_thr] [splits_file]"}
+EXP_NAME=${1:?"Usage: $0 <exp_name> [box_thr] [text_thr] [splits_file] [extra_args]"}
 BOX_THR=${2:-0.25}
 TEXT_THR=${3:-0.15}
 SPLITS=${4:-splits/splits.json}
+EXTRA_ARGS=${5:-""}
 SPLIT="test"
 
 OUT_DIR="outputs"
@@ -26,6 +29,7 @@ echo "Splits: $SPLITS" | tee -a "$LOG_FILE"
 echo "Split: $SPLIT" | tee -a "$LOG_FILE"
 echo "Box threshold: $BOX_THR" | tee -a "$LOG_FILE"
 echo "Text threshold: $TEXT_THR" | tee -a "$LOG_FILE"
+echo "Extra args: $EXTRA_ARGS" | tee -a "$LOG_FILE"
 echo "Output: $OUT_FILE" | tee -a "$LOG_FILE"
 echo "=============================================" | tee -a "$LOG_FILE"
 
@@ -35,8 +39,7 @@ echo "=== Prompt Info ===" >> "$LOG_FILE"
 python3 -c "
 from src.label_mapping import build_gdino_text_prompt, PROMPT_BOOST
 p = build_gdino_text_prompt()
-segs = p.count('.')
-print(f'Segments: {segs}')
+print(f'Segments: {p.count(\".\")}'  )
 print(f'Chars: {len(p)}')
 print(f'PROMPT_BOOST: {sorted(PROMPT_BOOST)}')
 print(f'Prompt: {p[:500]}...')
@@ -51,7 +54,7 @@ from src.label_mapping import build_gdino_text_prompt
 detector = DINODetector()
 prompt = build_gdino_text_prompt()
 n = detector.verify_prompt_budget(prompt)
-print(f'Tokens: {n} / 256')
+print(f'Single prompt tokens: {n} / 256')
 " >> "$LOG_FILE" 2>&1
 
 # ── 3) 파이프라인 실행 ──
@@ -64,7 +67,8 @@ python3 10_e2e_pipeline.py \
   --split "$SPLIT" \
   --box-threshold "$BOX_THR" \
   --text-threshold "$TEXT_THR" \
-  --out "$OUT_FILE" 2>&1 | tee -a "$LOG_FILE"
+  --out "$OUT_FILE" \
+  $EXTRA_ARGS 2>&1 | tee -a "$LOG_FILE"
 
 END=$(date +%s)
 ELAPSED=$((END - START))
@@ -127,7 +131,7 @@ for (gt_cat, pred_cat), cnt in confusions.most_common(20):
 # ── 5) 요약 기록 (CSV 한 줄 추가) ──
 SUMMARY_CSV="${LOG_DIR}/summary.csv"
 if [ ! -f "$SUMMARY_CSV" ]; then
-  echo "exp_name,date,splits,box_thr,text_thr,total,main_fail,main_fail_pct,correct,correct_pct,det_acc,elapsed_s" > "$SUMMARY_CSV"
+  echo "exp_name,date,splits,box_thr,text_thr,extra_args,total,main_fail,main_fail_pct,correct,correct_pct,det_acc,elapsed_s" > "$SUMMARY_CSV"
 fi
 
 python3 -c "
@@ -147,11 +151,14 @@ detected = total - main_fail
 mf_pct = main_fail/total*100 if total else 0
 c_pct = correct/total*100 if total else 0
 d_acc = correct/detected*100 if detected else 0
-print(f'${EXP_NAME},$(date +%Y-%m-%d),${SPLITS},${BOX_THR},${TEXT_THR},{total},{main_fail},{mf_pct:.1f},{correct},{c_pct:.1f},{d_acc:.1f},${ELAPSED}')
+print(f'${EXP_NAME},$(date +%Y-%m-%d),${SPLITS},${BOX_THR},${TEXT_THR},${EXTRA_ARGS},{total},{main_fail},{mf_pct:.1f},{correct},{c_pct:.1f},{d_acc:.1f},${ELAPSED}')
 " >> "$SUMMARY_CSV"
 
 echo ""
+echo "============================================="
 echo "Done! Results saved:"
-echo "  Log: $LOG_FILE"
-echo "  Eval: $EVAL_FILE"
+echo "  Log:     $LOG_FILE"
+echo "  Eval:    $EVAL_FILE"
 echo "  Summary: $SUMMARY_CSV"
+echo "  Output:  $OUT_FILE"
+echo "============================================="
