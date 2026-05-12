@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>생활폐기물 분류 AI 데모</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --p900: #3B0764; --p800: #4C1D95; --p700: #6D28D9;
+  --p600: #7C3AED; --p500: #8B5CF6; --p400: #A78BFA;
+  --p300: #C4B5FD; --p200: #DDD6FE; --p100: #EDE9FE; --p50: #F5F3FF;
+  --bg: #F3F0FF; --card: #fff; --text: #1E1B2E; --muted: #6B7280;
+  --green: #059669; --green-lt: #D1FAE5; --green-dk: #064E3B;
+  --blue: #2563EB; --blue-lt: #DBEAFE;
+}
+
+body { font-family: 'Segoe UI','Apple SD Gothic Neo',sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* ── Header ── */
+header {
+  background: linear-gradient(135deg, var(--p900), var(--p700));
+  padding: 20px 36px; display: flex; align-items: center; gap: 14px;
+  box-shadow: 0 4px 20px rgba(109,40,217,.35);
+}
+header .logo { font-size: 1.6rem; }
+header .ttl  { font-size: 1.2rem; font-weight: 800; color: #fff; letter-spacing: -.3px; }
+header .sub  { font-size: .76rem; color: var(--p300); margin-top: 2px; }
+
+/* ── Layout ── */
+.layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 24px;
+  max-width: 1400px;
+  margin: 32px auto;
+  padding: 0 24px;
+  align-items: start;
+}
+
+/* ── Upload panel ── */
+.upload-panel {
+  background: var(--card); border-radius: 20px; padding: 26px;
+  box-shadow: 0 4px 24px rgba(109,40,217,.1); border: 1.5px solid var(--p100);
+}
+.panel-label {
+  font-size: .7rem; font-weight: 700; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--p600); margin-bottom: 12px;
+}
+#drop-zone {
+  border: 2.5px dashed var(--p300); border-radius: 14px;
+  padding: 48px 20px; text-align: center; cursor: pointer;
+  background: var(--p50); transition: border-color .2s, background .2s, padding .3s;
+}
+#drop-zone:hover, #drop-zone.drag-over { border-color: var(--p600); background: var(--p100); }
+#drop-zone.compact { padding: 14px 20px; }
+#drop-zone.compact .dz-icon { font-size: 1.4rem; margin-bottom: 4px; }
+#drop-zone.compact .dz-main { font-size: .82rem; }
+#drop-zone.compact .dz-hint { font-size: .72rem; margin-top: 2px; }
+#drop-zone .dz-icon { font-size: 2.8rem; margin-bottom: 12px; display: block; }
+#drop-zone .dz-main { font-size: .95rem; font-weight: 700; color: var(--p700); }
+#drop-zone .dz-hint { font-size: .8rem; color: var(--muted); margin-top: 5px; }
+#file-input { display: none; }
+
+#preview-wrap { display: none; margin-top: 14px; }
+#preview-img { width: 100%; border-radius: 12px; object-fit: cover; max-height: 320px; box-shadow: 0 4px 16px rgba(109,40,217,.15); }
+.img-meta { font-size: .72rem; color: var(--muted); margin-top: 6px; text-align: right; }
+.btn-reset {
+  width: 100%; margin-top: 12px; padding: 10px;
+  border: 1.5px solid var(--p300); border-radius: 10px;
+  background: white; color: var(--p700); font-size: .86rem; font-weight: 600;
+  cursor: pointer; transition: background .15s;
+}
+.btn-reset:hover { background: var(--p100); }
+
+/* ── Result area ── */
+.result-area { display: flex; flex-direction: column; gap: 18px; }
+
+.placeholder-card {
+  background: var(--card); border-radius: 20px; padding: 72px 32px;
+  text-align: center; color: var(--muted);
+  border: 1.5px dashed var(--p200); font-size: .95rem;
+}
+.placeholder-card .ph-icon { font-size: 3.2rem; margin-bottom: 14px; display: block; }
+
+/* loading / error */
+.loading-card {
+  background: var(--card); border-radius: 20px; padding: 56px;
+  text-align: center; display: none;
+  box-shadow: 0 4px 24px rgba(109,40,217,.09);
+}
+.spinner {
+  width: 44px; height: 44px; border: 4px solid var(--p100);
+  border-top-color: var(--p600); border-radius: 50%;
+  animation: spin .75s linear infinite; margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-card p { color: var(--muted); font-size: .92rem; }
+.error-card {
+  background: #FFF1F2; border: 1.5px solid #FECDD3;
+  border-radius: 14px; padding: 18px; color: #9F1239;
+  font-size: .88rem; display: none;
+}
+
+/* ── Stage A (full-width shared) ── */
+.stage-a-card {
+  background: var(--card); border-radius: 20px; padding: 28px 32px;
+  box-shadow: 0 4px 24px rgba(109,40,217,.09); border: 1.5px solid var(--p100);
+  opacity: 0; transform: translateY(16px);
+  transition: opacity .4s ease, transform .4s ease;
+}
+.stage-a-card.visible { opacity: 1; transform: none; }
+
+.shared-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: .7rem; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; background: var(--p100); color: var(--p700);
+  padding: 4px 10px; border-radius: 20px; margin-bottom: 16px;
+}
+.stage-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.stage-num {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .82rem; font-weight: 800;
+}
+.num-a { background: var(--p600); color: #fff; }
+.stage-title { font-size: 1rem; font-weight: 800; }
+.stage-desc  { font-size: .76rem; color: var(--muted); margin-top: 2px; }
+
+.pred-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+.pred-name  { font-size: 1.5rem; font-weight: 900; color: var(--p700); }
+.pred-score { font-size: .88rem; color: var(--muted); }
+
+.bar-section-title {
+  font-size: .68rem; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
+}
+.bar-list { display: flex; flex-direction: column; gap: 9px; }
+.bar-row { display: flex; flex-direction: column; gap: 3px; }
+.bar-label-row { display: flex; justify-content: space-between; font-size: .82rem; }
+.bar-label-row .lbl { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-label-row .lbl.sel-lbl { font-weight: 700; color: var(--p700); }
+.bar-label-row .pct { color: var(--muted); font-weight: 600; }
+.bar-track { height: 8px; background: var(--p50); border-radius: 5px; overflow: hidden; border: 1px solid var(--p100); }
+.bar-fill { height: 100%; width: 0; border-radius: 5px; transition: width .65s cubic-bezier(.4,0,.2,1); }
+.bar-fill.bar-sel  { background: linear-gradient(90deg, var(--p600), var(--p400)); }
+.bar-fill.bar-rest { background: var(--p200); }
+
+/* ── Compare columns ── */
+.compare-label {
+  font-size: .7rem; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
+}
+.compare-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+}
+
+/* column header */
+.col-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 20px; border-radius: 14px 14px 0 0;
+  font-size: .9rem; font-weight: 800;
+}
+.col-header-clip  { background: var(--blue-lt); color: var(--blue); }
+.col-header-probe { background: var(--green-lt); color: var(--green-dk); }
+.col-header .ch-badge {
+  font-size: .68rem; font-weight: 700; letter-spacing: .4px;
+  padding: 3px 8px; border-radius: 20px;
+}
+.ch-badge-clip  { background: var(--blue);  color: #fff; }
+.ch-badge-probe { background: var(--green); color: #fff; }
+
+/* Stage C card */
+.stage-c-card {
+  background: var(--card); border-radius: 0 0 0 0; padding: 22px 24px;
+  border: 1.5px solid var(--p100); border-top: none;
+  opacity: 0; transform: translateY(14px);
+  transition: opacity .4s ease, transform .4s ease;
+}
+.stage-c-card.visible { opacity: 1; transform: none; }
+
+.c-pred-name  { font-size: 1.3rem; font-weight: 900; margin-bottom: 3px; }
+.c-pred-clip  { color: var(--blue); }
+.c-pred-probe { color: var(--green-dk); }
+.c-pred-score { font-size: .84rem; color: var(--muted); margin-bottom: 16px; }
+.diff-badge {
+  display: inline-block; font-size: .68rem; font-weight: 700;
+  background: #FEF3C7; color: #92400E;
+  padding: 2px 8px; border-radius: 20px; margin-left: 8px; vertical-align: middle;
+}
+
+/* Fee card */
+.fee-card {
+  background: linear-gradient(135deg, var(--p900), var(--p700));
+  padding: 22px 24px; border-radius: 0 0 14px 14px;
+  color: #fff;
+  opacity: 0; transform: translateY(14px);
+  transition: opacity .4s ease, transform .4s ease;
+}
+.fee-card.visible { opacity: 1; transform: none; }
+.fee-sub-name { font-size: 1.1rem; font-weight: 800; margin-bottom: 12px; }
+.fee-divider { border: none; border-top: 1px solid rgba(255,255,255,.15); margin: 12px 0; }
+.fee-spec-row { font-size: .78rem; color: var(--p300); margin-bottom: 6px; }
+.fee-amount { font-size: 2.2rem; font-weight: 900; color: #FDE68A; letter-spacing: -1px; }
+.fee-amount .won { font-size: 1.2rem; margin-right: 2px; }
+.fee-na { font-size: .82rem; color: rgba(255,255,255,.55); }
+.fee-source { font-size: .68rem; color: var(--p300); margin-top: 10px; }
+
+/* wrap each column's cards together */
+.col-wrap { display: flex; flex-direction: column; }
+
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; }
+  .compare-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">🗑️</span>
+  <div>
+    <div class="ttl">생활폐기물 분류 AI 데모</div>
+    <div class="sub">SigLIP2-L-512 · CLIP Zero-Shot vs Linear Probe 비교 · 수수료</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ── 업로드 패널 ── -->
+  <div class="upload-panel">
+    <div class="panel-label">이미지 업로드</div>
+    <div id="drop-zone">
+      <span class="dz-icon">📷</span>
+      <div class="dz-main">이미지를 드래그하거나 클릭</div>
+      <div class="dz-hint">.jpg · .png · .webp</div>
+    </div>
+    <input type="file" id="file-input" accept="image/*">
+    <div id="preview-wrap">
+      <img id="preview-img" src="" alt="preview">
+      <div class="img-meta" id="img-meta"></div>
+    </div>
+    <button class="btn-reset" id="btn-reset" style="display:none">↺ 다른 이미지 선택</button>
+  </div>
+
+  <!-- ── 결과 영역 ── -->
+  <div class="result-area">
+
+    <div class="placeholder-card" id="placeholder">
+      <span class="ph-icon">⬅️</span>
+      이미지를 업로드하면 두 모델의 결과를<br>나란히 비교할 수 있습니다
+    </div>
+
+    <div class="loading-card" id="loading">
+      <div class="spinner"></div>
+      <p>두 모델 추론 중...</p>
+    </div>
+
+    <div class="error-card" id="error-card"></div>
+
+    <!-- Stage A — 공유 -->
+    <div class="stage-a-card" id="card-a" style="display:none">
+      <span class="shared-badge">⬡ Stage A · 두 모델 공통</span>
+      <div class="stage-header">
+        <div class="stage-num num-a">A</div>
+        <div>
+          <div class="stage-title">Main Category 분류</div>
+          <div class="stage-desc">SigLIP2-L-512 zero-shot · 31-way · 두 모델 동일 결과</div>
+        </div>
+      </div>
+      <div class="pred-row">
+        <div class="pred-name" id="a-pred-name"></div>
+        <div class="pred-score" id="a-pred-score"></div>
+      </div>
+      <div class="bar-section-title">Top-5 후보</div>
+      <div class="bar-list" id="a-bars"></div>
+    </div>
+
+    <!-- Stage B + Fee — 2 컬럼 비교 -->
+    <div id="compare-section" style="display:none">
+      <div class="compare-label" style="margin-bottom:10px">Stage B + 수거 수수료 비교</div>
+      <div class="compare-grid">
+
+        <!-- CLIP Zero-Shot column -->
+        <div class="col-wrap">
+          <div class="col-header col-header-clip">
+            <span>CLIP Zero-Shot</span>
+            <span class="ch-badge ch-badge-clip">no_b</span>
+          </div>
+          <div class="stage-c-card" id="card-c-clip" style="display:none">
+            <div class="bar-section-title" style="margin-bottom:8px">Stage B · Sub Category</div>
+            <div class="c-pred-name c-pred-clip" id="c-pred-clip"></div>
+            <div class="c-pred-score" id="c-score-clip"></div>
+            <div class="bar-section-title">후보별 신뢰도</div>
+            <div class="bar-list" id="c-bars-clip"></div>
+          </div>
+          <div class="fee-card" id="fee-clip" style="display:none">
+            <div class="fee-sub-name" id="fee-sub-clip"></div>
+            <hr class="fee-divider">
+            <div id="fee-found-clip">
+              <div class="fee-spec-row">규격: <span id="fee-spec-clip"></span></div>
+              <div class="fee-amount"><span class="won">₩</span><span id="fee-val-clip"></span></div>
+            </div>
+            <div id="fee-na-clip" class="fee-na" style="display:none">수수료 정보 없음</div>
+          </div>
+        </div>
+
+        <!-- Linear Probe column -->
+        <div class="col-wrap">
+          <div class="col-header col-header-probe">
+            <span>Linear Probe</span>
+            <span class="ch-badge ch-badge-probe">probe</span>
+          </div>
+          <div class="stage-c-card" id="card-c-probe" style="display:none">
+            <div class="bar-section-title" style="margin-bottom:8px">Sub Category</div>
+            <div class="c-pred-name c-pred-probe" id="c-pred-probe"></div>
+            <div class="c-pred-score" id="c-score-probe"></div>
+            <div class="bar-section-title">후보별 신뢰도</div>
+            <div class="bar-list" id="c-bars-probe"></div>
+          </div>
+          <div class="fee-card" id="fee-probe" style="display:none">
+            <div class="fee-sub-name" id="fee-sub-probe"></div>
+            <hr class="fee-divider">
+            <div id="fee-found-probe">
+              <div class="fee-spec-row">규격: <span id="fee-spec-probe"></span></div>
+              <div class="fee-amount"><span class="won">₩</span><span id="fee-val-probe"></span></div>
+            </div>
+            <div id="fee-na-probe" class="fee-na" style="display:none">수수료 정보 없음</div>
+          </div>
+        </div>
+
+      </div><!-- /compare-grid -->
+    </div><!-- /compare-section -->
+
+  </div><!-- /result-area -->
+</div><!-- /layout -->
+
+<script>
+const dropZone    = document.getElementById('drop-zone');
+const fileInput   = document.getElementById('file-input');
+const previewWrap = document.getElementById('preview-wrap');
+const previewImg  = document.getElementById('preview-img');
+const imgMeta     = document.getElementById('img-meta');
+const btnReset    = document.getElementById('btn-reset');
+
+const placeholder = document.getElementById('placeholder');
+const loading     = document.getElementById('loading');
+const errorCard   = document.getElementById('error-card');
+const cardA       = document.getElementById('card-a');
+const compareSection = document.getElementById('compare-section');
+
+function show(el) { el.style.display = 'block'; }
+function hide(el) { el.style.display = 'none'; }
+function reveal(el, delay) { setTimeout(() => el.classList.add('visible'), delay); }
+
+// ── Upload ──
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+btnReset.addEventListener('click', resetAll);
+
+function resetAll() {
+  fileInput.value = '';
+  hide(previewWrap);
+  dropZone.classList.remove('compact');
+  hide(btnReset);
+  hide(loading); hide(errorCard); show(placeholder);
+  ['card-a','card-c-clip','card-c-probe','fee-clip','fee-probe'].forEach(id => {
+    const el = document.getElementById(id);
+    hide(el); el.classList.remove('visible');
+  });
+  hide(cardA); hide(compareSection);
+}
+
+function handleFile(file) {
+  previewImg.src = URL.createObjectURL(file);
+  show(previewWrap);
+  dropZone.classList.add('compact');
+  show(btnReset);
+  imgMeta.textContent = `${file.name}  ·  ${(file.size/1024).toFixed(0)} KB`;
+
+  hide(placeholder); hide(errorCard);
+  hide(cardA); hide(compareSection);
+  ['card-a','card-c-clip','card-c-probe','fee-clip','fee-probe'].forEach(id =>
+    document.getElementById(id).classList.remove('visible'));
+  show(loading);
+
+  const form = new FormData();
+  form.append('image', file);
+  fetch('/predict', { method: 'POST', body: form })
+    .then(r => r.json())
+    .then(data => { hide(loading); data.error ? showError(data.error) : renderResults(data); })
+    .catch(err => { hide(loading); showError('서버 오류: ' + err.message); });
+}
+
+function showError(msg) { errorCard.textContent = '⚠️ ' + msg; show(errorCard); }
+
+// ── Render ──
+function renderResults(data) {
+  const { stage_a: a, clip, probe } = data;
+  const clipC  = clip.stage_c;
+  const probeC = probe.stage_c;
+  const differ = clipC.pred_sub !== probeC.pred_sub;
+
+  // Stage A
+  document.getElementById('a-pred-name').textContent  = a.pred_main;
+  document.getElementById('a-pred-score').textContent = `신뢰도 ${(a.score*100).toFixed(1)}%`;
+  renderBars('a-bars', a.topk, 'label', 'score', a.pred_main, true);
+  show(cardA);
+  reveal(cardA, 50);
+
+  // Compare section
+  show(compareSection);
+
+  // Stage B — CLIP
+  const clipLabel = clipC.pred_sub || '-';
+  const diffBadge = differ ? '<span class="diff-badge">⚡ 결과 다름</span>' : '';
+  document.getElementById('c-pred-clip').innerHTML  = clipLabel + (differ ? diffBadge : '');
+  document.getElementById('c-score-clip').textContent = '';
+  if (clipC.all_scores_sorted) renderBars('c-bars-clip', clipC.all_scores_sorted.slice(0,6).map(([k,v])=>({k,v})), 'k','v', clipC.pred_sub, false);
+  show(document.getElementById('card-c-clip'));
+  reveal(document.getElementById('card-c-clip'), 500);
+
+  // Stage B — Probe
+  const probeLabel = probeC.pred_sub || '-';
+  document.getElementById('c-pred-probe').innerHTML  = probeLabel + (differ ? diffBadge : '');
+  document.getElementById('c-score-probe').textContent = '';
+  if (probeC.all_scores_sorted) renderBars('c-bars-probe', probeC.all_scores_sorted.slice(0,6).map(([k,v])=>({k,v})), 'k','v', probeC.pred_sub, false);
+  show(document.getElementById('card-c-probe'));
+  reveal(document.getElementById('card-c-probe'), 500);
+
+  // Fee — CLIP
+  renderFee('fee-clip', 'fee-sub-clip', 'fee-found-clip', 'fee-na-clip', 'fee-spec-clip', 'fee-val-clip', clipC.pred_sub, clip.fee);
+  show(document.getElementById('fee-clip'));
+  reveal(document.getElementById('fee-clip'), 1000);
+
+  // Fee — Probe
+  renderFee('fee-probe', 'fee-sub-probe', 'fee-found-probe', 'fee-na-probe', 'fee-spec-probe', 'fee-val-probe', probeC.pred_sub, probe.fee);
+  show(document.getElementById('fee-probe'));
+  reveal(document.getElementById('fee-probe'), 1000);
+}
+
+function renderFee(cardId, subId, foundId, naId, specId, valId, predSub, fee) {
+  document.getElementById(subId).textContent = predSub || '-';
+  if (fee) {
+    show(document.getElementById(foundId));
+    hide(document.getElementById(naId));
+    document.getElementById(specId).textContent = fee['규격'];
+    document.getElementById(valId).textContent  = fee.fee.toLocaleString();
+  } else {
+    hide(document.getElementById(foundId));
+    show(document.getElementById(naId));
+  }
+}
+
+function renderBars(containerId, items, lKey, sKey, selected, showPct) {
+  const wrap = document.getElementById(containerId);
+  wrap.innerHTML = '';
+  const maxVal = Math.max(...items.map(x => x[sKey]));
+  items.forEach(item => {
+    const isSel = item[lKey] === selected;
+    const pct   = maxVal > 0 ? (item[sKey] / maxVal * 100).toFixed(1) : 0;
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML = `
+      <div class="bar-label-row">
+        <span class="lbl${isSel ? ' sel-lbl' : ''}">${item[lKey]}</span>
+        ${showPct ? `<span class="pct">${(item[sKey]*100).toFixed(1)}%</span>` : ''}
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill ${isSel ? 'bar-sel' : 'bar-rest'}" data-w="${pct}%" style="width:0"></div>
+      </div>`;
+    wrap.appendChild(row);
+  });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    wrap.querySelectorAll('.bar-fill').forEach(el => { el.style.width = el.dataset.w; });
+  }));
+}
+</script>
+</body>
+</html>

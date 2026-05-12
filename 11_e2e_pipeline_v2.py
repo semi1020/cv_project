@@ -122,7 +122,48 @@ def _stage_c_probe(clf: CLIPZeroShot, image: "Image.Image", probe_entry: dict) -
     }
 
 
+def _pretty_print(file_name: str, a: dict, b: dict, c: dict) -> None:
+    print(f"\n{'='*50}")
+    print(f"  이미지: {file_name}")
+    print(f"{'='*50}")
+    print(f"\n[Stage A] Main category")
+    print(f"  → {a['pred_main']}  (score: {a['score']:.4f})")
+    print(f"  Top-{len(a['topk'])}:")
+    for item in a["topk"]:
+        marker = "✓" if item["label_kor"] == a["pred_main"] else " "
+        print(f"    {marker} {item['label_kor']:<30} {item['score']:.4f}")
+
+    if b.get("skipped"):
+        print(f"\n[Stage B] 생략 (--skip-stage-b)")
+    elif b.get("error"):
+        print(f"\n[Stage B] 오류: {b['error']}")
+    else:
+        fb = " (fallback: full image)" if b.get("fallback") else ""
+        print(f"\n[Stage B] GDINO crop{fb}")
+        print(f"  prompt: {b.get('dino_prompt')}  score: {b.get('score')}")
+
+    print(f"\n[Stage C] Sub category{'  [probe]' if c.get('via_probe') else '  [CLIP zero-shot]'}")
+    if c.get("pred_sub"):
+        print(f"  → {c['pred_sub']}  (score: {c['score']:.4f})")
+        if c.get("all_scores"):
+            sorted_subs = sorted(c["all_scores"].items(), key=lambda x: x[1], reverse=True)
+            for label, score in sorted_subs:
+                marker = "✓" if label == c["pred_sub"] else " "
+                print(f"    {marker} {label:<40} {score:.4f}")
+    else:
+        print(f"  오류: {c.get('error')}")
+
+    print(f"\n{'='*50}")
+    print(f"  최종: {a['pred_main']} / {c.get('pred_sub', '-')}")
+    print(f"{'='*50}\n")
+
+
 def _iter_image_paths(args) -> list[tuple[str, str]]:
+    if getattr(args, "image", None) is not None:
+        p = args.image
+        if not p.exists():
+            raise SystemExit(f"[error] image not found: {p}")
+        return [(p.name, str(p))]
     if args.splits is not None:
         splits = load_splits(args.splits)
         if args.split not in splits:
@@ -131,7 +172,7 @@ def _iter_image_paths(args) -> list[tuple[str, str]]:
         return [(r.file_name, r.image_path) for r in recs]
     img_dir = args.images
     if not img_dir or not img_dir.is_dir():
-        raise SystemExit("[error] pass --splits or a valid --images directory")
+        raise SystemExit("[error] pass --image, --images, or --splits")
     paths = sorted(p for p in img_dir.iterdir()
                    if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"})
     return [(p.name, str(p)) for p in paths]
@@ -140,7 +181,8 @@ def _iter_image_paths(args) -> list[tuple[str, str]]:
 def parse_args():
     p = argparse.ArgumentParser()
     src = p.add_mutually_exclusive_group(required=False)
-    src.add_argument("--images", type=Path)
+    src.add_argument("--image",  type=Path, help="Single image file path")
+    src.add_argument("--images", type=Path, help="Directory of images")
     src.add_argument("--splits", type=Path)
     p.add_argument("--split", default="test")
     p.add_argument("--limit", type=int, default=None)
@@ -294,6 +336,9 @@ def main():
             "skip_stage_b": args.skip_stage_b,
         }
         fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        if getattr(args, "image", None) is not None:
+            _pretty_print(file_name, a, b, c)
 
         if i % 50 == 0:
             elapsed = time.time() - t0
