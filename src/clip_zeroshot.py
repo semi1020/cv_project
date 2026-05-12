@@ -47,6 +47,19 @@ class CLIPZeroShot:
         self.model_id = model_id
         self._is_siglip = _is_siglip_family(model_id)
 
+    def encode_image(self, image: Image.Image) -> "torch.Tensor":
+        """Return L2-normalized image embedding as a (D,) CPU tensor.
+
+        Works for CLIP, SigLIP, and SigLIP2 (which returns ModelOutput instead of Tensor).
+        """
+        inputs = self._proc(images=image, return_tensors="pt")
+        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = self._model.get_image_features(**inputs)
+        emb = out.pooler_output if hasattr(out, "pooler_output") else out  # (1, D)
+        emb = emb / emb.norm(dim=-1, keepdim=True)
+        return emb.cpu()[0]  # (D,)
+
     def classify(self, image: Image.Image, candidates: dict[str, str]) -> dict:
         """Classify image against text candidates.
 

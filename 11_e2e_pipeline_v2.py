@@ -103,6 +103,25 @@ def _stage_c(clf: CLIPZeroShot, image: Image.Image, main_kor: str) -> dict:
     }
 
 
+def _stage_c_probe(clf: CLIPZeroShot, image: "Image.Image", probe_entry: dict) -> dict:
+    """Linear probe sub classification — uses pre-trained per-main linear head."""
+    import torch
+    emb = clf.encode_image(image)                   # (D,) CPU tensor
+    w = probe_entry["w"]                            # (n_cls, D)
+    b = probe_entry["b"]                            # (n_cls,)
+    logits = emb @ w.T + b                          # (n_cls,)
+    probs  = logits.softmax(dim=0)
+    classes = probe_entry["classes"]
+    pred_idx = int(probs.argmax())
+    pred_sub = classes[pred_idx]
+    return {
+        "pred_sub": pred_sub,
+        "score": round(float(probs[pred_idx]), 6),
+        "all_scores": {c: round(float(probs[i]), 6) for i, c in enumerate(classes)},
+        "via_probe": True,
+    }
+
+
 def _iter_image_paths(args) -> list[tuple[str, str]]:
     if args.splits is not None:
         splits = load_splits(args.splits)
@@ -138,6 +157,9 @@ def parse_args():
     p.add_argument("--skip-stage-b", action="store_true", default=False,
                    help="Skip GDINO crop. Use full image for Stage C "
                         "(per exp1, DINO crop = +0.1pp F1 only)")
+    p.add_argument("--probe-dir", type=Path, default=None,
+                   help="Directory containing sub_probes.pt (from exp_probe_train.py). "
+                        "If set, uses linear probe for Stage C on supported main classes.")
     p.add_argument("--out", type=Path, default=None,
                    help="default: outputs/e2e_v2_{model_short}_{a-mode}{_no_b}.jsonl")
     p.add_argument("--crop-dir", type=Path, default=Path("outputs/crops_e2e_v2"))
@@ -156,7 +178,8 @@ def main():
     if args.out is None:
         short = model_short_name(args.model_id)
         suffix = "_no_b" if args.skip_stage_b else ""
-        args.out = Path(f"outputs/e2e_v2_{short}_{args.stage_a_mode}{suffix}.jsonl")
+        probe_tag = "_probe" if args.probe_dir is not None else ""
+        args.out = Path(f"outputs/e2e_v2_{short}_{args.stage_a_mode}{suffix}{probe_tag}.jsonl")
 
     print(f"[info] model_id={args.model_id}", file=sys.stderr)
     if args.stage_c_model_id and args.stage_c_model_id != args.model_id:
@@ -194,6 +217,18 @@ def main():
     else:
         stage_c_clf = CLIPZeroShot(model_id=stage_c_model_id)
     print(f"[info] Stage C: {stage_c_model_id} zero-shot sub", file=sys.stderr)
+
+    # ── Linear probes (optional) ──
+    import torch as _torch
+    probes: dict = {}
+    if args.probe_dir is not None:
+        probe_path = args.probe_dir / "sub_probes.pt"
+        if probe_path.exists():
+            probes = _torch.load(probe_path, weights_only=True, map_location="cpu")
+            print(f"[info] probe: loaded {len(probes)} per-main probes from {probe_path}",
+                  file=sys.stderr)
+        else:
+            print(f"[warn] probe file not found: {probe_path}", file=sys.stderr)
 
     print(f"[info] images: {len(items)}  out={args.out}", file=sys.stderr)
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -238,9 +273,12 @@ def main():
                  "score": None, "box": None, "fallback": None}
             crop_image = image
 
-        # Stage C
+        # Stage C — use linear probe if available for this main, else CLIP zero-shot
         if pred_main:
-            c = _stage_c(stage_c_clf, crop_image, pred_main)
+            if pred_main in probes:
+                c = _stage_c_probe(stage_c_clf, crop_image, probes[pred_main])
+            else:
+                c = _stage_c(stage_c_clf, crop_image, pred_main)
         else:
             c = {"pred_sub": None, "score": None, "all_scores": None}
 
